@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.spec
+*.log
+.DS_Store
+Thumbs.db
+
+# 本地手动解包的依赖（约 212 MB，不进仓库）
+.pylibs/
+# 冒烟脚本的临时数据目录
+.smoke-data/
+# 运行时数据（正常写在 %APPDATA% 下，这里只是兜底）
+notes*.json
+window-state.json
+crash.log
