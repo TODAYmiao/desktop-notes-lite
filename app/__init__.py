@@ -1,0 +1,1 @@
+"""Desktop Notes Lite package."""
