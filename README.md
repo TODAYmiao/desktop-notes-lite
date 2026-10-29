@@ -4,6 +4,10 @@ A translucent, always-on-top desktop sticky note for Windows: a month calendar o
 
 ![桌面便签 Lite](screenshots/app.png)
 
+## 下载
+
+[**DesktopNotesLite.exe**](https://github.com/TODAYmiao/desktop-notes-lite/releases/latest) — Windows 10/11 64 位，无需安装 Python。
+
 ## 功能
 
 - **半透明无边框小组件**：拖动顶栏移动，位置自动记忆，可切换始终置顶
