@@ -1,5 +1,7 @@
 """自绘的小部件：图标按钮、日期格、勾选圈、色块、开关、待办行等。"""
 
+from datetime import datetime
+
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
@@ -102,6 +104,11 @@ class IconButton(QAbstractButton):
             painter.drawLine(QPointF(cx - 4, cy - 1), QPointF(cx, cy - 5))
             painter.drawLine(QPointF(cx + 4, cy - 1), QPointF(cx, cy - 5))
             painter.drawLine(QPointF(cx - 6, cy + 8), QPointF(cx + 6, cy + 8))
+        elif kind == "idea":
+            painter.drawEllipse(QPointF(cx, cy - 1.8), 4.4, 4.6)
+            painter.drawLine(QPointF(cx - 2.2, cy + 2.8), QPointF(cx - 2.2, cy + 5.2))
+            painter.drawLine(QPointF(cx + 2.2, cy + 2.8), QPointF(cx + 2.2, cy + 5.2))
+            painter.drawLine(QPointF(cx - 1.6, cy + 7.2), QPointF(cx + 1.6, cy + 7.2))
         elif kind == "close":
             painter.drawLine(QPointF(cx - 4.5, cy - 4.5), QPointF(cx + 4.5, cy + 4.5))
             painter.drawLine(QPointF(cx + 4.5, cy - 4.5), QPointF(cx - 4.5, cy + 4.5))
@@ -600,6 +607,107 @@ class TodoRow(QWidget):
         painter.drawRoundedRect(QRectF(self.rect()), 9, 9)
 
 
+def _format_idea_time(created_at) -> str:
+    if not created_at:
+        return ""
+    try:
+        return datetime.fromtimestamp(float(created_at) / 1000).strftime("%m月%d日 %H:%M")
+    except (ValueError, OSError, OverflowError):
+        return ""
+
+
+class IdeaRow(QWidget):
+    opened = Signal(object)
+    deleted = Signal(str)
+
+    def __init__(self, item: dict, theme: Theme):
+        super().__init__()
+        self.item = item
+        self.theme = theme
+        self._hover = False
+        children = item.get("children") or []
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("双击进入，记录子灵感")
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 10, 10, 10)
+        layout.setSpacing(8)
+
+        self.label = EditableLabel()
+        self.label.setWordWrap(True)
+        self.label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.label.setText(item.get("text", ""))
+        self.label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.label.setToolTip("双击进入，记录子灵感")
+        self.label.doubleClicked.connect(lambda: self.opened.emit(self.item))
+        font = QFont("Microsoft YaHei UI")
+        font.setPixelSize(13)
+        self.label.setFont(font)
+        self.label.setStyleSheet("color: rgba(244,239,231,230); background: transparent;")
+        layout.addWidget(self.label, 1)
+
+        right = QVBoxLayout()
+        right.setContentsMargins(0, 0, 0, 0)
+        right.setSpacing(2)
+
+        meta_parts = []
+        time_text = _format_idea_time(item.get("createdAt"))
+        if time_text:
+            meta_parts.append(time_text)
+        if children:
+            meta_parts.append(f"{len(children)} 个子灵感")
+        self.meta_label = QLabel(" · ".join(meta_parts) if meta_parts else "双击进入")
+        self.meta_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop
+        )
+        self.meta_label.setStyleSheet(
+            "color: rgba(244,239,231,88); background: transparent; font-size: 9px;"
+        )
+        right.addWidget(self.meta_label)
+
+        self.delete = DelButton(theme)
+        self.delete.setToolTip("删除（会一并删除子灵感）" if children else "删除")
+        self.delete.clicked.connect(lambda: self.deleted.emit(self.item["id"]))
+        right.addWidget(self.delete, 0, Qt.AlignmentFlag.AlignRight)
+        right.addStretch(1)
+        layout.addLayout(right)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.opened.emit(self.item)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def enterEvent(self, event) -> None:
+        self._hover = True
+        self.delete.set_row_hovered(True)
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hover = False
+        self.delete.set_row_hovered(False)
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        painter.setPen(QPen(QColor(255, 255, 255, 20), 1))
+        painter.setBrush(QColor(255, 255, 255, 16 if self._hover else 10))
+        painter.drawRoundedRect(rect, 10, 10)
+
+        pen = QPen(with_alpha(self.theme.accent, 170), 2)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(5.5, 10), QPointF(5.5, self.height() - 10))
+
+
 class MonthCard(QFrame):
     def __init__(self, theme: Theme):
         super().__init__()
@@ -630,19 +738,19 @@ class MonthCard(QFrame):
 
 
 class EmptyState(QWidget):
-    def __init__(self):
+    def __init__(self, title_text="这天还没有待办", hint_text="在下方输入，回车即可添加"):
         super().__init__()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 0, 10, 0)
         layout.setSpacing(4)
         layout.addStretch(1)
 
-        title = QLabel("这天还没有待办")
+        title = QLabel(title_text)
         title.setObjectName("emptyTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 
-        hint = QLabel("在下方输入，回车即可添加")
+        hint = QLabel(hint_text)
         hint.setObjectName("emptyHint")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(hint)

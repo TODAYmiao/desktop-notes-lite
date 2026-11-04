@@ -13,11 +13,18 @@ A translucent, always-on-top desktop sticky note for Windows: a month calendar o
 - **半透明无边框小组件**：拖动顶栏移动，位置自动记忆，可切换始终置顶
 - **月历 + 每日待办**：点日期切换当天列表；有未完成显示橙点，全部完成显示灰点
 - **待办操作**：回车添加、点圆圈完成、双击文字编辑、悬停 × 删除
+- **灵感板块**：顶栏灯泡或 `Ctrl+I` 打开，默认隐藏；第一层记录灵感，双击进入它的页面，可编辑标题并无限嵌套子灵感
 - **调色盘**：7 个预设色 + 自定义取色器，颜色会联动强调色和背景光晕
 - **不透明度**：35%–95% 可调
 - **系统托盘**：显示/隐藏、始终置顶、开机自启、退出
 - **单实例运行**：重复启动只会唤回已有窗口
 - **本地存储**：JSON 自动保存，无需账号或网络
+
+## 灵感板块
+
+点顶栏灯泡（或按 `Ctrl+I`）打开，默认隐藏。第一层是灵感列表，双击任意一条进入它的页面：上方可以修改标题，下方添加子灵感；子灵感也能继续双击进入，支持无限层级。顶部面包屑和「← 上一级」用于返回。
+
+![灵感板块](screenshots/ideas.png)
 
 ## 环境
 
@@ -54,7 +61,7 @@ python main.py
 .venv\Scripts\pyinstaller.exe --noconfirm --clean --onefile --windowed --name "DesktopNotesLite" --icon "assets/icon.ico" --add-data "assets;assets" main.py
 ```
 
-产物在 `dist\DesktopNotesLite.exe`。单文件版约 41 MB，启动约 2.6 秒；在作者机器上空闲内存约 30–55 MB。
+产物在 `dist\DesktopNotesLite.exe`。单文件版约 42 MB，启动约 2.6 秒；在作者机器上空闲内存约 30–55 MB。
 
 ## 数据位置
 
@@ -62,7 +69,7 @@ python main.py
 %APPDATA%\DesktopNotesLite\notes.json
 ```
 
-首次启动自动创建。格式是按日期分组的待办列表：
+首次启动自动创建。待办按日期分组，灵感按 `children` 嵌套：
 
 ```json
 {
@@ -71,6 +78,16 @@ python main.py
       { "id": "...", "text": "整理本周计划", "done": false, "createdAt": 1 }
     ]
   },
+  "ideas": [
+    {
+      "id": "...",
+      "text": "产品灵感",
+      "createdAt": 2,
+      "children": [
+        { "id": "...", "text": "首页改版", "createdAt": 3 }
+      ]
+    }
+  ],
   "settings": { "opacity": 80, "alwaysOnTop": true, "accent": "#ffb26b" }
 }
 ```
@@ -83,8 +100,9 @@ python main.py
 main.py              入口：单实例、启动窗口
 app/theme.py         配色、明暗对比、全局 QSS
 app/store.py         JSON 读写
-app/widgets.py       自绘按钮、日期格、勾选圈、色块、开关、待办行
-app/window.py        主窗口、日历、待办、托盘、开机自启
+app/widgets.py       自绘按钮、日期格、勾选圈、色块、开关、待办行、灵感卡片
+app/ideas.py         树状灵感板块
+app/window.py        主窗口、日历、待办、灵感、托盘、开机自启
 assets/              应用图标、托盘图标
 screenshots/         README 截图
 start.vbs            无控制台启动

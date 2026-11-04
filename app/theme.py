@@ -129,6 +129,7 @@ QPushButton { background: transparent; border: none; }
     border: 1px solid __LINE__;
     border-radius: 12px;
 }
+#pageStack { background: transparent; border: none; }
 #scrollArea, #listContainer { background: transparent; border: none; }
 #scrollArea QWidget { background: transparent; }
 
@@ -203,6 +204,23 @@ QSlider::handle:horizontal {
 #countLabel { color: __MUTED__; font-size: 10px; }
 #emptyTitle { color: rgba(244, 239, 231, 133); font-size: 12px; }
 #emptyHint { color: rgba(244, 239, 231, 77); font-size: 11px; }
+
+#ideaTitle { font-size: 16px; font-weight: 600; }
+#ideaSubtitle { color: __MUTED__; font-size: 10px; }
+#ideaCount { color: __MUTED__; font-size: 10px; }
+#ideaBack { color: __ACCENT_TEXT__; font-size: 11px; border-radius: 6px; padding: 4px 6px; }
+#ideaBack:hover { background: __ACCENT_10__; }
+#ideaBreadcrumb { color: __MUTED__; font-size: 11px; }
+#ideaNodeTitle {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid transparent;
+    color: __TEXT__;
+    font-size: 16px;
+    font-weight: 600;
+    padding: 0 0 3px 0;
+}
+#ideaNodeTitle:focus { border-bottom: 1px solid __ACCENT_50__; }
 
 QMenu {
     background: #202027;

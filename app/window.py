@@ -13,11 +13,13 @@ from PySide6.QtGui import (
     QFont,
     QGuiApplication,
     QIcon,
+    QKeySequence,
     QPainter,
     QPainterPath,
     QPalette,
     QPen,
     QRadialGradient,
+    QShortcut,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -32,11 +34,13 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSlider,
+    QStackedWidget,
     QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
 
+from .ideas import IdeasView
 from .store import Store
 from .theme import (
     DEFAULT_ACCENT,
@@ -92,15 +96,12 @@ def is_autostart_enabled() -> bool:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
             winreg.QueryValueEx(key, AUTOSTART_VALUE)
             return True
-    except (ImportError, FileNotFoundError, OSError):
+    except (FileNotFoundError, OSError):
         return False
 
 
 def set_autostart_enabled(enabled: bool) -> bool:
-    try:
-        import winreg
-    except ImportError:
-        return False
+    import winreg
 
     with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
         if enabled:
@@ -207,9 +208,11 @@ class TitleBar(QWidget):
         layout.addWidget(brand)
         layout.addStretch(1)
 
+        self.idea_btn = IconButton(theme, "idea", 28, "灵感记录 (Ctrl+I)")
         self.opacity_btn = IconButton(theme, "opacity", 28, "颜色与不透明度")
         self.pin_btn = IconButton(theme, "pin", 28, "置顶")
         self.close_btn = IconButton(theme, "close", 28, "隐藏到托盘", danger=True)
+        layout.addWidget(self.idea_btn)
         layout.addWidget(self.opacity_btn)
         layout.addWidget(self.pin_btn)
         layout.addWidget(self.close_btn)
@@ -405,25 +408,37 @@ class NotesWindow(QWidget):
         self.titlebar = TitleBar(self.theme)
         shell_layout.addWidget(self.titlebar)
 
+        self.stack = QStackedWidget()
+        self.stack.setObjectName("pageStack")
+        shell_layout.addWidget(self.stack, 1)
+
         content = QWidget()
         content_layout = QHBoxLayout(content)
         content_layout.setContentsMargins(14, 0, 14, 14)
         content_layout.setSpacing(12)
-        shell_layout.addWidget(content, 1)
 
         content_layout.addWidget(self._build_calendar_column())
         content_layout.addWidget(self._build_todo_panel(), 1)
+
+        self.stack.addWidget(content)
+        self.ideas_view = IdeasView(self.store, self.theme, self.show_todos)
+        self.stack.addWidget(self.ideas_view)
+        self.stack.setCurrentWidget(content)
 
         self.popover = Popover(self.shell, self.theme)
         self.popover.colorPicked.connect(self.set_accent)
         self.popover.opacityChanged.connect(self.set_opacity)
         self.popover.autostartToggled.connect(self.set_autostart)
 
+        self.titlebar.idea_btn.clicked.connect(self.toggle_ideas)
         self.titlebar.opacity_btn.clicked.connect(self.toggle_popover)
         self.titlebar.pin_btn.clicked.connect(
             lambda: self.set_pin(not self.store.settings.get("alwaysOnTop", True))
         )
         self.titlebar.close_btn.clicked.connect(self.hide_to_tray)
+
+        self._idea_shortcut = QShortcut(QKeySequence("Ctrl+I"), self)
+        self._idea_shortcut.activated.connect(self.toggle_ideas)
 
         self.add_input.installEventFilter(self)
 
@@ -845,6 +860,7 @@ class NotesWindow(QWidget):
         self.store.settings["accent"] = accent
         self.setStyleSheet(self.theme.stylesheet())
         self.popover.sync_accent(accent)
+        self.ideas_view.refresh_theme()
         for widget in self.findChildren(QWidget):
             widget.update()
         self._update_count()
@@ -869,6 +885,24 @@ class NotesWindow(QWidget):
         self._refresh_tray()
 
     # ---------- 浮层 ----------
+
+    # ---------- 灵感 ----------
+
+    def toggle_ideas(self) -> None:
+        if self.stack.currentIndex() == 1:
+            self.show_todos()
+            return
+        self.popover.hide()
+        self.ideas_view.render()
+        self.stack.setCurrentIndex(1)
+        self.titlebar.idea_btn.setActive(True)
+        self.ideas_view.focus_input()
+
+    def show_todos(self) -> None:
+        self.ideas_view.reset_to_root()
+        self.stack.setCurrentIndex(0)
+        self.titlebar.idea_btn.setActive(False)
+        self.add_input.setFocus()
 
     def toggle_popover(self) -> None:
         if self.popover.isVisible():
@@ -953,6 +987,7 @@ class NotesWindow(QWidget):
         self._quitting = True
         self._save_timer.stop()
         self._save_position()
+        self.ideas_view.flush()
         self.store.save()
         self.tray.hide()
         QApplication.quit()

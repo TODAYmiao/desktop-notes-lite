@@ -23,8 +23,31 @@ def _default_data() -> dict:
     return {
         "version": 1,
         "todos": {},
+        "ideas": [],
         "settings": {"opacity": 80, "alwaysOnTop": True, "accent": DEFAULT_ACCENT},
     }
+
+
+def _clean_ideas(items, depth=0) -> list:
+    if not isinstance(items, list) or depth > 30:
+        return []
+    cleaned = []
+    for item in items:
+        if not isinstance(item, dict) or not isinstance(item.get("text"), str):
+            continue
+        text = item["text"].strip()[:500]
+        if not text:
+            continue
+        node = {
+            "id": item.get("id") if isinstance(item.get("id"), str) and item.get("id") else str(uuid.uuid4()),
+            "text": text,
+            "createdAt": item.get("createdAt") if isinstance(item.get("createdAt"), (int, float)) else 0,
+        }
+        children = _clean_ideas(item.get("children"), depth + 1)
+        if children:
+            node["children"] = children
+        cleaned.append(node)
+    return cleaned
 
 
 def sanitize(raw) -> dict:
@@ -54,6 +77,8 @@ def sanitize(raw) -> dict:
                 )
             if clean:
                 out["todos"][key] = clean
+
+    out["ideas"] = _clean_ideas(raw.get("ideas"))
 
     settings = raw.get("settings")
     if isinstance(settings, dict):
@@ -98,6 +123,10 @@ class Store:
     @property
     def todos(self) -> dict:
         return self.data["todos"]
+
+    @property
+    def ideas(self) -> list:
+        return self.data.setdefault("ideas", [])
 
     @property
     def settings(self) -> dict:
