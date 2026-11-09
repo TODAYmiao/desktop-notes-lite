@@ -67,14 +67,16 @@ def sanitize(raw) -> dict:
                 text = item["text"].strip()[:500]
                 if not text:
                     continue
-                clean.append(
-                    {
-                        "id": item.get("id") if isinstance(item.get("id"), str) and item.get("id") else str(uuid.uuid4()),
-                        "text": text,
-                        "done": item.get("done") is True,
-                        "createdAt": item.get("createdAt") if isinstance(item.get("createdAt"), (int, float)) else 0,
-                    }
-                )
+                entry = {
+                    "id": item.get("id") if isinstance(item.get("id"), str) and item.get("id") else str(uuid.uuid4()),
+                    "text": text,
+                    "done": item.get("done") is True,
+                    "createdAt": item.get("createdAt") if isinstance(item.get("createdAt"), (int, float)) else 0,
+                }
+                due_at = item.get("dueAt")
+                if isinstance(due_at, (int, float)) and due_at > 0:
+                    entry["dueAt"] = int(due_at)
+                clean.append(entry)
             if clean:
                 out["todos"][key] = clean
 

@@ -4,10 +4,10 @@ import ctypes
 import sys
 import time
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, QTime, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -54,6 +54,7 @@ from .widgets import (
     AddButton,
     BrandDot,
     DayButton,
+    DeadlineDialog,
     EmptyState,
     IconButton,
     MonthCard,
@@ -366,6 +367,7 @@ class NotesWindow(QWidget):
         self._hide_hint_shown = False
         self._position_ready = False
         self._initial_topmost_done = False
+        self._pending_due = None
 
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
@@ -374,6 +376,10 @@ class NotesWindow(QWidget):
         self._position_timer = QTimer(self)
         self._position_timer.setSingleShot(True)
         self._position_timer.timeout.connect(self._save_position)
+
+        self._deadline_timer = QTimer(self)
+        self._deadline_timer.setInterval(30_000)
+        self._deadline_timer.timeout.connect(self._refresh_deadlines)
 
         self.setWindowTitle("桌面便签 Lite")
         self.setWindowIcon(QIcon(str(ASSETS / "icon.png")))
@@ -389,6 +395,7 @@ class NotesWindow(QWidget):
         self.popover.hide()
 
         self._position_ready = True
+        self._deadline_timer.start()
         QApplication.instance().installEventFilter(self)
 
     # ---------- 构建界面 ----------
@@ -593,12 +600,18 @@ class NotesWindow(QWidget):
         self.add_input.setPalette(palette)
         self.add_input.returnPressed.connect(self.add_todo)
 
+        self.deadline_btn = IconButton(self.theme, "clock", 26, "设置限时任务")
+        self.deadline_btn.clicked.connect(self.pick_add_deadline)
+
         self.add_btn = AddButton(self.theme)
         self.add_btn.clicked.connect(self.add_todo)
 
         bar_layout.addWidget(self.add_input, 1)
+        bar_layout.addWidget(self.deadline_btn)
         bar_layout.addWidget(self.add_btn)
         layout.addWidget(self.add_bar)
+
+        self._update_deadline_button()
 
         return panel
 
@@ -726,6 +739,7 @@ class NotesWindow(QWidget):
                 row.toggled.connect(self.toggle_todo)
                 row.deleted.connect(self.delete_todo)
                 row.edited.connect(self.edit_todo)
+                row.deadlineClicked.connect(self.edit_deadline)
                 self.list_layout.addWidget(row)
             self.list_layout.addStretch(1)
 
@@ -759,6 +773,7 @@ class NotesWindow(QWidget):
         if day.year != self.view_year or day.month != self.view_month:
             self.view_year, self.view_month = day.year, day.month
         self.selected_key = button.date_key
+        self._clear_pending_deadline()
         self.render_all()
 
     def _shift_month(self, delta: int) -> None:
@@ -784,6 +799,7 @@ class NotesWindow(QWidget):
         today = date.today()
         self.selected_key = today.isoformat()
         self.view_year, self.view_month = today.year, today.month
+        self._clear_pending_deadline()
         self.render_all()
         self.add_input.setFocus()
 
@@ -793,14 +809,16 @@ class NotesWindow(QWidget):
         text = self.add_input.text().strip()
         if not text:
             return
-        self.store.todos.setdefault(self.selected_key, []).append(
-            {
-                "id": str(uuid.uuid4()),
-                "text": text[:200],
-                "done": False,
-                "createdAt": int(time.time() * 1000),
-            }
-        )
+        item = {
+            "id": str(uuid.uuid4()),
+            "text": text[:200],
+            "done": False,
+            "createdAt": int(time.time() * 1000),
+        }
+        if self._pending_due is not None:
+            item["dueAt"] = self._due_timestamp(self._pending_due)
+        self.store.todos.setdefault(self.selected_key, []).append(item)
+        self._clear_pending_deadline()
         self.add_input.clear()
         self.store.save()
         self.render_calendar()
@@ -845,6 +863,78 @@ class NotesWindow(QWidget):
         self.store.save()
         self.render_todos()
 
+    # ---------- 限时任务 ----------
+
+    def _update_deadline_button(self) -> None:
+        pending = self._pending_due
+        self.deadline_btn.setActive(pending is not None)
+        if pending is not None:
+            self.deadline_btn.setToolTip(
+                f"新任务限时 {pending.toString('HH:mm')}，点击修改"
+            )
+        else:
+            self.deadline_btn.setToolTip("设置限时任务")
+
+    def _clear_pending_deadline(self) -> None:
+        if self._pending_due is not None:
+            self._pending_due = None
+            self._update_deadline_button()
+
+    def pick_add_deadline(self) -> None:
+        action, qtime = DeadlineDialog.get(
+            self,
+            self.theme,
+            self._pending_due,
+            allow_clear=self._pending_due is not None,
+        )
+        if action == "clear":
+            self._pending_due = None
+        elif action == "set" and qtime is not None:
+            self._pending_due = qtime
+        self._update_deadline_button()
+        self.add_input.setFocus()
+
+    def _due_timestamp(self, qtime: QTime) -> int:
+        day = date.fromisoformat(self.selected_key)
+        moment = datetime(day.year, day.month, day.day, qtime.hour(), qtime.minute())
+        return int(moment.timestamp() * 1000)
+
+    def edit_deadline(self, item_id: str) -> None:
+        item = next(
+            (entry for entry in self.store.items_for(self.selected_key)
+             if entry.get("id") == item_id),
+            None,
+        )
+        if item is None:
+            return
+        due = item.get("dueAt")
+        initial = None
+        if isinstance(due, (int, float)) and due > 0:
+            try:
+                initial = datetime.fromtimestamp(float(due) / 1000).time()
+            except (ValueError, OSError, OverflowError):
+                initial = None
+        action, qtime = DeadlineDialog.get(
+            self,
+            self.theme,
+            initial,
+            allow_clear=initial is not None,
+            title="修改限时",
+        )
+        if action == "clear":
+            item.pop("dueAt", None)
+        elif action == "set" and qtime is not None:
+            item["dueAt"] = self._due_timestamp(qtime)
+        else:
+            return
+        self.store.save()
+        self.render_todos()
+
+    def _refresh_deadlines(self) -> None:
+        now_ms = int(datetime.now().timestamp() * 1000)
+        for row in self.list_widget.findChildren(TodoRow):
+            row.refresh_deadline(now_ms)
+
     # ---------- 设置 ----------
 
     def set_opacity(self, value: int) -> None:
@@ -864,6 +954,7 @@ class NotesWindow(QWidget):
         for widget in self.findChildren(QWidget):
             widget.update()
         self._update_count()
+        self._refresh_deadlines()
         self.store.save()
 
     def set_pin(self, on: bool, persist: bool = True) -> None:

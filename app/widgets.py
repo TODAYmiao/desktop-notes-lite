@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, Qt, QTime, Signal
 from PySide6.QtGui import (
     QColor,
     QConicalGradient,
@@ -14,11 +14,14 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractButton,
+    QDialog,
+    QDialogButtonBox,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QSizePolicy,
+    QTimeEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -109,6 +112,10 @@ class IconButton(QAbstractButton):
             painter.drawLine(QPointF(cx - 2.2, cy + 2.8), QPointF(cx - 2.2, cy + 5.2))
             painter.drawLine(QPointF(cx + 2.2, cy + 2.8), QPointF(cx + 2.2, cy + 5.2))
             painter.drawLine(QPointF(cx - 1.6, cy + 7.2), QPointF(cx + 1.6, cy + 7.2))
+        elif kind == "clock":
+            painter.drawEllipse(QPointF(cx, cy), 5.6, 5.6)
+            painter.drawLine(QPointF(cx, cy), QPointF(cx, cy - 3.2))
+            painter.drawLine(QPointF(cx, cy), QPointF(cx + 2.6, cy + 1.2))
         elif kind == "close":
             painter.drawLine(QPointF(cx - 4.5, cy - 4.5), QPointF(cx + 4.5, cy + 4.5))
             painter.drawLine(QPointF(cx + 4.5, cy - 4.5), QPointF(cx - 4.5, cy + 4.5))
@@ -475,6 +482,126 @@ class EditableLabel(QLabel):
         super().mouseDoubleClickEvent(event)
 
 
+class DeadlineLabel(QLabel):
+    clicked = Signal()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
+class DeadlineDialog(QDialog):
+    def __init__(
+        self,
+        parent: QWidget,
+        theme: Theme,
+        initial: QTime | None = None,
+        allow_clear: bool = False,
+        title: str = "设置限时任务",
+    ):
+        super().__init__(parent)
+        self.theme = theme
+        self._action = "cancel"
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self.setFixedWidth(260)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 14)
+        layout.setSpacing(12)
+
+        label = QLabel("截止时间（HH:mm）")
+        layout.addWidget(label)
+
+        self.time_edit = QTimeEdit()
+        self.time_edit.setDisplayFormat("HH:mm")
+        self.time_edit.setTime(initial if initial is not None else self._default_time())
+        self.time_edit.setFixedHeight(34)
+        layout.addWidget(self.time_edit)
+
+        box = QDialogButtonBox()
+        ok = box.addButton("确定", QDialogButtonBox.ButtonRole.AcceptRole)
+        cancel = box.addButton("取消", QDialogButtonBox.ButtonRole.RejectRole)
+        clear = None
+        if allow_clear:
+            clear = box.addButton("移除限时", QDialogButtonBox.ButtonRole.DestructiveRole)
+
+        ok.clicked.connect(self._accept)
+        cancel.clicked.connect(self.reject)
+        if clear is not None:
+            clear.clicked.connect(self._clear)
+        layout.addWidget(box)
+
+        self.setStyleSheet(
+            """
+            QDialog { background: #202027; }
+            QLabel {
+                color: #f4efe7;
+                background: transparent;
+                font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI";
+                font-size: 12px;
+            }
+            QTimeEdit {
+                background: rgba(255,255,255,15);
+                border: 1px solid rgba(255,255,255,35);
+                border-radius: 6px;
+                color: #f4efe7;
+                padding: 4px 8px;
+                font-size: 16px;
+            }
+            QPushButton {
+                background: rgba(255,255,255,14);
+                border: 1px solid rgba(255,255,255,30);
+                border-radius: 6px;
+                color: #f4efe7;
+                padding: 5px 12px;
+                font-size: 12px;
+            }
+            QPushButton:hover { background: rgba(255,255,255,24); }
+            """
+        )
+        ok.setStyleSheet(
+            f"QPushButton {{ background: {theme.accent_hex}; color: {theme.ink_hex};"
+            " border: none; border-radius: 6px; padding: 5px 14px; font-size: 12px; }"
+            f" QPushButton:hover {{ background: {QColor(theme.accent_hex).lighter(108).name()}; }}"
+        )
+        if clear is not None:
+            clear.setStyleSheet("QPushButton { color: #ff9a9a; }")
+
+        self.time_edit.setFocus()
+
+    @staticmethod
+    def _default_time() -> QTime:
+        now = QTime.currentTime()
+        candidate = now.addSecs(3600)
+        return QTime(23, 59) if candidate < now else candidate
+
+    def _accept(self) -> None:
+        self._action = "set"
+        self.accept()
+
+    def _clear(self) -> None:
+        self._action = "clear"
+        self.accept()
+
+    @classmethod
+    def get(
+        cls,
+        parent: QWidget,
+        theme: Theme,
+        initial: QTime | None = None,
+        allow_clear: bool = False,
+        title: str = "设置限时任务",
+    ):
+        dialog = cls(parent, theme, initial, allow_clear, title)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            return dialog._action, dialog.time_edit.time()
+        return "cancel", None
+
+
 class InlineEdit(QLineEdit):
     committed = Signal(str)
     cancelled = Signal()
@@ -521,6 +648,7 @@ class TodoRow(QWidget):
     toggled = Signal(str)
     deleted = Signal(str)
     edited = Signal(str, str)
+    deadlineClicked = Signal(str)
 
     def __init__(self, item: dict, theme: Theme):
         super().__init__()
@@ -544,19 +672,32 @@ class TodoRow(QWidget):
         self.label.setText(item.get("text", ""))
         self.label.setToolTip("双击编辑")
         self.label.doubleClicked.connect(self.begin_edit)
-        layout.addWidget(self.label, 1)
 
         self.edit = InlineEdit(theme)
         self.edit.hide()
         self.edit.committed.connect(self._on_edit_done)
         self.edit.cancelled.connect(self._on_edit_cancel)
-        layout.addWidget(self.edit, 1)
+
+        self.meta = DeadlineLabel()
+        self.meta.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.meta.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.meta.hide()
+        self.meta.clicked.connect(lambda: self.deadlineClicked.emit(self.item["id"]))
+
+        text_box = QVBoxLayout()
+        text_box.setContentsMargins(0, 0, 0, 0)
+        text_box.setSpacing(1)
+        text_box.addWidget(self.label)
+        text_box.addWidget(self.meta)
+        text_box.addWidget(self.edit)
+        layout.addLayout(text_box, 1)
 
         self.delete = DelButton(theme)
         self.delete.clicked.connect(lambda: self.deleted.emit(self.item["id"]))
         layout.addWidget(self.delete, 0, Qt.AlignmentFlag.AlignTop)
 
         self._apply_done_style()
+        self.refresh_deadline()
 
     def _apply_done_style(self) -> None:
         done = bool(self.item.get("done"))
@@ -566,6 +707,39 @@ class TodoRow(QWidget):
         self.label.setFont(font)
         color = "rgba(244, 239, 231, 82)" if done else "rgba(244, 239, 231, 230)"
         self.label.setStyleSheet(f"color: {color}; background: transparent;")
+
+    def refresh_deadline(self, now_ms=None) -> None:
+        due = self.item.get("dueAt")
+        if not isinstance(due, (int, float)) or due <= 0:
+            self.meta.hide()
+            self.check.setToolTip("标记完成 / 取消")
+            return
+        try:
+            stamp = datetime.fromtimestamp(float(due) / 1000).strftime("%H:%M")
+        except (ValueError, OSError, OverflowError):
+            self.meta.hide()
+            return
+
+        if now_ms is None:
+            now_ms = int(datetime.now().timestamp() * 1000)
+
+        if self.item.get("done"):
+            text = f"{stamp} 打卡"
+            color = "rgba(244, 239, 231, 82)"
+        elif due <= now_ms:
+            text = f"超时 · {stamp}"
+            color = "#ff8d8d"
+        else:
+            text = f"{stamp} 前打卡"
+            color = self.theme.accent_text_hex
+
+        self.meta.setText(text)
+        self.meta.setStyleSheet(
+            f"color: {color}; background: transparent; font-size: 9px; padding: 0;"
+        )
+        self.meta.setToolTip("点击修改或移除限时")
+        self.meta.show()
+        self.check.setToolTip("打卡完成 / 取消")
 
     def begin_edit(self) -> None:
         self.label.hide()
